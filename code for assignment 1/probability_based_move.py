@@ -15,7 +15,6 @@ from AIMA.logic import *
 from AIMA.utils import *
 from AIMA.probability import *
 from tkinter import messagebox
-from logic_based_move import *
 
 #--------------------------------------------------------------------------------------------------------------
 #
@@ -92,67 +91,71 @@ def PitWumpus_probability_distribution(self, width, height):
 #---------------------------------------------------------------------------------------------------
 
 def next_room_prob(self, x, y):
+    new_room = self.next_room(x, y)
+    if new_room == (0, 0):
+        # first check if the variable is valid or not
+        if self.jdP_PWs.is_valid():
+            surrounding = self.cave.getsurrounding(x, y)
+            # To choose the room to access, first have to get R_Query
+            # R_Query = Surrounding Room - R_known
+            r_Query = R_Query(self,
+                              surrounding)  # R_query stores all the adjacent rooms of current position for the agent
+            # print(r_Query)
+            # The agent have to decide which room to go
+            # By calculating the possibility of danger of each room
+            # Then go to the one with lower dangers
+            PqTrues = dict()
+            R_others = set()  # fix here
+            for each_room in self.PW_variables:
+                test_room = int(each_room[1]), int(each_room[3])
+                if test_room not in self.visited_rooms and test_room not in r_Query:
+                    R_others.add(test_room)
 
-    # first check if the variable is valid or not
-    if self.jdP_PWs.is_valid():
-        surrounding = self.cave.getsurrounding(x,y)
-        # To choose the room to access, first have to get R_Query
-        # R_Query = Surrounding Room - R_known
-        r_Query = R_Query(self,surrounding)  # R_query stores all the adjacent rooms of current position for the agent
-        # print(r_Query)
-        # The agent have to decide which room to go
-        # By calculating the possibility of danger of each room
-        # Then go to the one with lower dangers
-        PqTrues = dict()
-        R_others = set() # fix here
-        for each_room in self.PW_variables:
-            test_room = int(each_room[1]), int(each_room[3])
-            if test_room not in self.visited_rooms and test_room not in r_Query:
-                R_others.add(test_room)
+            for room in r_Query:
+                # Firstly, need to find R_others which represents the rooms that haven't accessed
+                # And the rooms which are not adjacent for the agent
+                # Calculate R_unknown
+                R_unknown = list(R_others.union(r_Query - {room}))
+                R_unknown_str = tupleConverted(R_unknown)
+                known_BS = self.observation_breeze_stench(self.visited_rooms)
+                known_PW = self.observation_pits(self.visited_rooms)
 
-        for room in r_Query:
-            # Firstly, need to find R_others which represents the rooms that haven't accessed
-            # And the rooms which are not adjacent for the agent
-            # Calculate R_unknown
-            R_unknown = list(R_others.union(r_Query - {room}))
-            R_unknown_str = tupleConverted(R_unknown)
-            known_BS = self.observation_breeze_stench(self.visited_rooms)
-            known_PW = self.observation_pits(self.visited_rooms)
-            # Calculate the possibility of having pits or Wumpus in the next room
-            # Accumulate all of the possibility that Pq is true
-            known_PW['({},{})'.format(room[0], room[1])] = True
+                # Calculate the possibility of having pits or Wumpus in the next room
+                # Accumulate all of the possibility that Pq is true
+                known_PW['({},{})'.format(room[0], room[1])] = True
+                print(known_PW)
+                Pq_true_events = all_events_jpd(R_unknown_str, self.jdP_PWs, known_PW)
+                PqTrue = 0  # Accumulate the truth of having Wumpus in JPD
+                for event in Pq_true_events:
+                    consistency = self.consistent(known_BS, event)
+                    PqTrue += self.jdP_PWs[event] * consistency
 
-            Pq_true_events = all_events_jpd(R_unknown_str, self.jdP_PWs, known_PW)
-            PqTrue = 0 # Accumulate the truth of having Wumpus in JPD
-            for event in Pq_true_events:
-                consistency = self.consistent(known_BS, event)
-                PqTrue += self.jdP_PWs[event] * consistency
+                # Accumulate all of the possibility that Pq is false
+                known_PW['({},{})'.format(room[0], room[1])] = False
+                Pq_false_events = all_events_jpd(R_unknown_str, self.jdP_PWs, known_PW)
+                PqFalse = 0  # Accumulate the truth of having no Wumpus in JPD
+                for event in Pq_false_events:
+                    consistency = self.consistent(known_BS, event)
+                    PqFalse += self.jdP_PWs[event] * consistency
 
-            # Accumulate all of the possibility that Pq is false
-            known_PW['({},{})'.format(room[0], room[1])] = False
-            Pq_false_events = all_events_jpd(R_unknown_str, self.jdP_PWs, known_PW)
-            PqFalse = 0 # Accumulate the truth of having no Wumpus in JPD
-            for event in Pq_false_events:
-                consistency = self.consistent(known_BS, event)
-                if consistency == 0:
-                    PqFalse += self.jdP_PWs[event]
+                print('Pq true:', PqTrue)
+                print('Pq False:', PqFalse)
 
-            print('Pq true:',PqTrue)
-            print('Pq False:', PqFalse)
-            # Pq_true normalised = Pq_true / Pq_false + Pq_true
-            Pq_true_normalised = PqTrue / (PqFalse + PqTrue)
-            # Using dictionary to store coordinate and the truth of possibility
-            PqTrues[room] = Pq_true_normalised
-        print(PqTrues)
-        for cor_A in PqTrues:
-            lowest_pos = (0,0)
-            for cor_B in PqTrues:
-                if PqTrues[cor_A] <= PqTrues[cor_B]:
-                    if PqTrues[cor_A] <= self.max_pit_probability:
-                        lowest_pos = cor_A
-            print(lowest_pos)
-            return lowest_pos
-    return (0,0)
+                Pq_true_normalised = PqTrue / (PqFalse + PqTrue)
+
+                print('Pq true normalised:', Pq_true_normalised)
+                Pq_false_normalised = PqFalse / (PqFalse + PqTrue)
+
+                # Using dictionary to store coordinate and the truth of possibility
+                PqTrues[room] = Pq_true_normalised
+            print(PqTrues)
+            if bool(PqTrues):
+                min_prob = min(PqTrues, key=PqTrues.get)
+                if PqTrues[min_prob] < self.max_pit_probability:
+                    print('minimum:', min(PqTrues, key=PqTrues.get))
+                    return min_prob
+        return (0, 0)
+    return new_room
 #---------------------------------------------------------------------------------------------------
 def R_Query(self, surrounding):
     r_qurey = set()
